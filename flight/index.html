@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>アメリカ大陸 遊覧飛行</title>
+<script src="https://cdn.jsdelivr.net/npm/cesium@1.123.0/Build/Cesium/Cesium.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/cesium@1.123.0/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<style>
+  html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#000;
+    font-family: "Hiragino Sans", "Noto Sans JP", sans-serif; -webkit-user-select:none; user-select:none; touch-action:none; }
+  #globe { position:absolute; inset:0; }
+  .cesium-viewer-bottom { opacity:.6; }
+  /* 照準（機首） */
+  #nose { position:absolute; left:50%; top:50%; width:90px; height:30px; margin:-15px 0 0 -45px; pointer-events:none; }
+  /* 計器 */
+  #hud { position:absolute; top:8px; left:8px; right:8px; display:flex; gap:6px; flex-wrap:wrap; pointer-events:none; }
+  .box { background:rgba(0,0,0,.55); color:#fff; border-radius:8px; padding:4px 9px; font-size:13px; line-height:1.3; }
+  .box b { font-size:17px; color:#7fffd4; }
+  #dest { position:absolute; top:62px; left:8px; right:78px; text-align:center; pointer-events:none; }
+  #arrow { display:inline-block; font-size:26px; color:#ffd54f; transition:transform .1s; }
+  /* 操作ボタン */
+  .pad { position:absolute; bottom:14px; display:grid; gap:6px; }
+  #padL { left:12px; grid-template-columns:repeat(3,58px); grid-template-rows:repeat(3,58px); }
+  #padR { right:12px; grid-template-columns:repeat(2,62px); grid-template-rows:repeat(3,58px); }
+  .btn { background:rgba(255,255,255,.22); border:1px solid rgba(255,255,255,.5); color:#fff; border-radius:12px;
+    font-size:22px; display:flex; align-items:center; justify-content:center; touch-action:none; }
+  .btn.small { font-size:14px; }
+  .btn:active, .btn.on { background:rgba(127,255,212,.45); }
+  /* メニュー */
+  #menu, #msg { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.55); }
+  .card { background:#fff; color:#222; border-radius:14px; padding:18px 20px; width:min(88vw,380px); box-shadow:0 6px 30px rgba(0,0,0,.4); }
+  .card h1 { font-size:20px; margin:0 0 10px; }
+  .card label { display:block; font-size:14px; margin:10px 0 4px; }
+  .card select { width:100%; font-size:16px; padding:6px; }
+  .card button { margin-top:16px; width:100%; font-size:18px; padding:10px; border:0; border-radius:10px; background:#1e88e5; color:#fff; }
+  .card p { font-size:13px; line-height:1.6; margin:8px 0 0; color:#444; }
+  .hidden { display:none !important; }
+  #menuBtn { position:absolute; right:8px; top:62px; }
+</style>
+</head>
+<body>
+<div id="globe"></div>
+
+<svg id="nose" viewBox="0 0 90 30"><path d="M0 15 H30 L45 25 L60 15 H90" fill="none" stroke="#ffd54f" stroke-width="3"/></svg>
+
+<div id="hud">
+  <div class="box">速度 <b id="spd">0</b> km/h</div>
+  <div class="box">高度 <b id="alt">0</b> m</div>
+  <div class="box">方位 <b id="hdg">0</b>°</div>
+  <div class="box">倍速 <b id="acc">×1</b></div>
+</div>
+<div id="dest" class="hidden"><div class="box" style="display:inline-block"><span id="arrow">⬆</span> <span id="destTxt"></span></div></div>
+<div class="btn small" id="menuBtn" style="width:62px;height:34px">メニュー</div>
+
+<div class="pad" id="padL">
+  <div></div><div class="btn" data-k="down">▲</div><div></div>
+  <div class="btn" data-k="left">◀</div><div class="btn small" id="viewBtn">視点</div><div class="btn" data-k="right">▶</div>
+  <div></div><div class="btn" data-k="up">▼</div><div></div>
+</div>
+<div class="pad" id="padR">
+  <div class="btn small" data-k="faster">加速</div><div class="btn small" id="timeUp">倍速＋</div>
+  <div class="btn small" data-k="slower">減速</div><div class="btn small" id="timeDown">倍速－</div>
+  <div class="btn small" id="autoBtn" style="grid-column:span 2">水平飛行</div>
+</div>
+
+<div id="menu">
+  <div class="card">
+    <h1>✈ アメリカ大陸 遊覧飛行</h1>
+    <label>出発地</label><select id="from"></select>
+    <label>目的地</label><select id="to"></select>
+    <button id="start">離陸する</button>
+    <p>▲▼で機首の上げ下げ、◀▶で旋回。目的地の方角は画面上の黄色い矢印です。遠くへ行くときは「倍速＋」で時間を早めましょう。目的地の上空15km以内に入ると到着です。<br>パソコンでは矢印キー・W/S（加速/減速）・1/2（倍速）・V（視点）も使えます。</p>
+  </div>
+</div>
+<div id="msg" class="hidden"><div class="card"><h1 id="msgTitle"></h1><p id="msgBody"></p><button id="msgBtn">メニューへ</button></div></div>
+
+<script>
+// ===== 場所のリスト（緯度・経度） =====
+const PLACES = [
+  { name:"サンフランシスコ（ゴールデンゲート）", lat:37.8199, lon:-122.4783 },
+  { name:"ロサンゼルス",            lat:34.0522, lon:-118.2437 },
+  { name:"ラスベガス",              lat:36.1147, lon:-115.1728 },
+  { name:"グランドキャニオン",      lat:36.0544, lon:-112.1401 },
+  { name:"シカゴ",                  lat:41.8781, lon:-87.6298 },
+  { name:"ナイアガラの滝",          lat:43.0828, lon:-79.0742 },
+  { name:"ニューヨーク（マンハッタン）", lat:40.7580, lon:-73.9855 },
+  { name:"ワシントンD.C.",          lat:38.8895, lon:-77.0353 },
+  { name:"マイアミ",                lat:25.7617, lon:-80.1918 },
+  { name:"バンクーバー",            lat:49.2827, lon:-123.1207 },
+  { name:"メキシコシティ",          lat:19.4326, lon:-99.1332 },
+  { name:"パナマ運河",              lat:9.0800,  lon:-79.6800 },
+  { name:"マチュピチュ",            lat:-13.1631, lon:-72.5450 },
+  { name:"リオデジャネイロ",        lat:-22.9519, lon:-43.2105 },
+];
+
+// ===== 地球（Cesium）の準備：Esriの衛星写真を使用（APIキー不要） =====
+const viewer = new Cesium.Viewer("globe", {
+  baseLayer: new Cesium.ImageryLayer(new Cesium.UrlTemplateImageryProvider({
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    maximumLevel: 19, credit: "Imagery © Esri, Maxar, Earthstar Geographics"
+  })),
+  terrainProvider: new Cesium.EllipsoidTerrainProvider(),
+  animation:false, timeline:false, baseLayerPicker:false, geocoder:false, homeButton:false,
+  sceneModePicker:false, navigationHelpButton:false, fullscreenButton:false, infoBox:false, selectionIndicator:false,
+});
+// 地名・国境のラベルを重ねる
+viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+  url: "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+  maximumLevel: 19
+}));
+viewer.scene.screenSpaceCameraController.enableInputs = false; // 指で地球を回さない
+viewer.scene.skyAtmosphere.show = true;
+viewer.scene.fog.enabled = true;
+viewer.scene.globe.maximumScreenSpaceError = 2.5;
+
+// 目的地のマーカー
+const destEntity = viewer.entities.add({
+  position: Cesium.Cartesian3.fromDegrees(0,0),
+  point: { pixelSize: 14, color: Cesium.Color.YELLOW, outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+           disableDepthTestDistance: Number.POSITIVE_INFINITY },
+  label: { text:"", font:"16px sans-serif", fillColor:Cesium.Color.YELLOW, outlineColor:Cesium.Color.BLACK,
+           outlineWidth:3, style:Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset:new Cesium.Cartesian2(0,-22),
+           disableDepthTestDistance: Number.POSITIVE_INFINITY }
+});
+
+// ===== 飛行機の状態 =====
+const R = 6371000, D2R = Math.PI/180;
+const plane = { lat:0, lon:0, alt:1500, hdg:0, pitch:0, roll:0, v:70 }; // v: m/s
+const TIMES = [1, 5, 20, 60, 200];
+let timeIdx = 0, viewDown = false, flying = false, dest = null, startTime = 0, flown = 0;
+const keys = {};
+
+// ===== メニュー =====
+const fromSel = document.getElementById("from"), toSel = document.getElementById("to");
+PLACES.forEach((p,i)=>{ fromSel.add(new Option(p.name,i)); toSel.add(new Option(p.name,i)); });
+toSel.value = 6; // ニューヨーク
+
+function bearing(lat1, lon1, lat2, lon2){ // ラジアン
+  const y = Math.sin(lon2-lon1)*Math.cos(lat2);
+  const x = Math.cos(lat1)*Math.sin(lat2) - Math.sin(lat1)*Math.cos(lat2)*Math.cos(lon2-lon1);
+  return Math.atan2(y,x);
+}
+function distance(lat1, lon1, lat2, lon2){ // メートル
+  const a = Math.sin((lat2-lat1)/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin((lon2-lon1)/2)**2;
+  return 2*R*Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
+document.getElementById("start").onclick = () => {
+  const f = PLACES[fromSel.value], t = PLACES[toSel.value];
+  if (f === t) { toSel.focus(); return; }
+  dest = { name:t.name, lat:t.lat*D2R, lon:t.lon*D2R };
+  Object.assign(plane, { lat:f.lat*D2R, lon:f.lon*D2R, alt:1500, pitch:0, roll:0, v:70 });
+  plane.hdg = bearing(plane.lat, plane.lon, dest.lat, dest.lon);
+  destEntity.position = Cesium.Cartesian3.fromDegrees(t.lon, t.lat, 0);
+  destEntity.label.text = t.name;
+  timeIdx = 0; flown = 0; startTime = performance.now();
+  document.getElementById("menu").classList.add("hidden");
+  flying = true;
+  document.getElementById("dest").classList.remove("hidden");
+};
+document.getElementById("menuBtn").onclick = () => { flying = false; document.getElementById("menu").classList.remove("hidden"); };
+document.getElementById("msgBtn").onclick = () => {
+  document.getElementById("msg").classList.add("hidden");
+  document.getElementById("menu").classList.remove("hidden");
+};
+function showMsg(title, body){
+  flying = false;
+  document.getElementById("msgTitle").textContent = title;
+  document.getElementById("msgBody").innerHTML = body;
+  document.getElementById("msg").classList.remove("hidden");
+}
+
+// ===== 操作（ボタン・キーボード） =====
+document.querySelectorAll("[data-k]").forEach(b=>{
+  const k = b.dataset.k;
+  const on = e => { e.preventDefault(); keys[k]=true; b.classList.add("on"); };
+  const off = e => { keys[k]=false; b.classList.remove("on"); };
+  b.addEventListener("pointerdown", on); b.addEventListener("pointerup", off);
+  b.addEventListener("pointerleave", off); b.addEventListener("pointercancel", off);
+});
+const tap = (id, fn) => document.getElementById(id).addEventListener("pointerdown", e=>{ e.preventDefault(); fn(); });
+tap("timeUp",   ()=> timeIdx = Math.min(TIMES.length-1, timeIdx+1));
+tap("timeDown", ()=> timeIdx = Math.max(0, timeIdx-1));
+tap("viewBtn",  ()=> viewDown = !viewDown);
+tap("autoBtn",  ()=> { plane.pitch = 0; plane.roll = 0; });
+
+const KEYMAP = { ArrowLeft:"left", ArrowRight:"right", ArrowUp:"down", ArrowDown:"up", w:"faster", s:"slower" };
+addEventListener("keydown", e=>{
+  if (KEYMAP[e.key]) { keys[KEYMAP[e.key]] = true; e.preventDefault(); }
+  if (e.key==="2") timeIdx = Math.min(TIMES.length-1, timeIdx+1);
+  if (e.key==="1") timeIdx = Math.max(0, timeIdx-1);
+  if (e.key==="v") viewDown = !viewDown;
+});
+addEventListener("keyup", e=>{ if (KEYMAP[e.key]) keys[KEYMAP[e.key]] = false; });
+
+// ===== 毎フレームの計算 =====
+const hudEl = id => document.getElementById(id);
+let last = performance.now();
+viewer.scene.preRender.addEventListener(()=>{
+  const now = performance.now();
+  const dt = Math.min(0.1, (now-last)/1000); last = now;
+
+  if (flying) {
+    // 傾き（ロール）と機首（ピッチ）
+    const rollTarget = keys.left ? -35*D2R : keys.right ? 35*D2R : 0;
+    plane.roll += (rollTarget - plane.roll) * Math.min(1, dt*2.5);
+    if (keys.down) plane.pitch -= 12*D2R*dt;   // ▲ = 機首下げ（操縦桿を押す）
+    if (keys.up)   plane.pitch += 12*D2R*dt;   // ▼ = 機首上げ（操縦桿を引く）
+    plane.pitch = Math.max(-30*D2R, Math.min(30*D2R, plane.pitch));
+    // 速度（km/hで 150〜900）
+    if (keys.faster) plane.v += 40*dt;
+    if (keys.slower) plane.v -= 40*dt;
+    plane.v = Math.max(150/3.6, Math.min(900/3.6, plane.v));
+    // 旋回：傾けた分だけ曲がる（倍速でも旋回は普通の速さ）
+    plane.hdg += 9.8*Math.tan(plane.roll)/Math.max(plane.v,60)*dt * 1.6;
+
+    // 前進（倍速をかける）
+    const d = plane.v * dt * TIMES[timeIdx];
+    const dh = d*Math.cos(plane.pitch), dv = d*Math.sin(plane.pitch);
+    const ang = dh/(R+plane.alt);
+    const lat2 = Math.asin(Math.sin(plane.lat)*Math.cos(ang) + Math.cos(plane.lat)*Math.sin(ang)*Math.cos(plane.hdg));
+    const lon2 = plane.lon + Math.atan2(Math.sin(plane.hdg)*Math.sin(ang)*Math.cos(plane.lat),
+                                        Math.cos(ang) - Math.sin(plane.lat)*Math.sin(lat2));
+    // 進んだぶん方位を補正（大円に沿って飛ぶ）
+    plane.hdg = bearing(lat2, lon2, plane.lat, plane.lon) + Math.PI;
+    plane.lat = lat2; plane.lon = lon2;
+    plane.alt = Math.min(15000, plane.alt + dv);
+    flown += dh;
+
+    if (plane.alt <= 30) {
+      showMsg("💥 墜落しました", "高度が低くなりすぎました。▼ボタンで機首を上げるのを忘れずに！");
+    }
+    const dist = distance(plane.lat, plane.lon, dest.lat, dest.lon);
+    if (dist < 15000) {
+      const min = ((now-startTime)/60000).toFixed(1);
+      showMsg("🎉 到着！", `${dest.name}に到着しました。<br>飛行距離 約${Math.round(flown/1000).toLocaleString()} km／プレイ時間 ${min} 分`);
+    }
+
+    // 計器の表示
+    hudEl("spd").textContent = Math.round(plane.v*3.6);
+    hudEl("alt").textContent = Math.round(plane.alt).toLocaleString();
+    const hdgDeg = ((plane.hdg/D2R)%360+360)%360;
+    hudEl("hdg").textContent = Math.round(hdgDeg);
+    hudEl("acc").textContent = "×" + TIMES[timeIdx];
+    const rel = bearing(plane.lat, plane.lon, dest.lat, dest.lon)/D2R - hdgDeg;
+    hudEl("arrow").style.transform = `rotate(${rel}deg)`;
+    hudEl("destTxt").textContent = `${dest.name}まで ${Math.round(dist/1000).toLocaleString()} km`;
+  }
+
+  // カメラ＝操縦席からの眺め
+  viewer.camera.setView({
+    destination: Cesium.Cartesian3.fromRadians(plane.lon, plane.lat, plane.alt),
+    orientation: { heading: plane.hdg, pitch: plane.pitch + (viewDown ? -60 : -12)*D2R, roll: plane.roll }
+  });
+});
+
+// 最初はメニューの背景にサンフランシスコ上空を表示
+Object.assign(plane, { lat:PLACES[0].lat*D2R, lon:PLACES[0].lon*D2R, alt:3000, hdg:90*D2R });
+</script>
+</body>
+</html>
