@@ -1,0 +1,113 @@
+:root {
+  --ink: #2b2118;
+  --paper: #f6efe1;
+  --card: #fffaf0;
+  --line: #d9c9a8;
+  --accent: #a8322d;   /* 朱 */
+  --accent2: #2f5d8a;  /* 藍 */
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  display: flex; flex-direction: column;
+  font-family: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif;
+  color: var(--ink); background: var(--paper);
+  -webkit-text-size-adjust: 100%;
+}
+button, input { font: inherit; }
+
+/* ヘッダー */
+#top {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 6px 10px; padding-top: max(6px, env(safe-area-inset-top));
+  background: var(--accent); color: #fff;
+}
+#top h1 { margin: 0; font-size: 1.05rem; letter-spacing: .08em; white-space: nowrap; }
+#top h1 span { margin-left: .6em; font-size: .75em; opacity: .85; }
+#search { display: flex; flex: 1 1 220px; gap: 4px; min-width: 0; }
+#search input { flex: 1; min-width: 0; padding: 6px 8px; border: 0; border-radius: 4px; }
+#top button {
+  padding: 6px 12px; border: 1px solid rgba(255,255,255,.7); border-radius: 4px;
+  background: transparent; color: #fff; cursor: pointer;
+}
+#top button[aria-pressed="true"] { background: #fff; color: var(--accent); }
+
+/* レイアウト: スマホは 上=地図(江戸|現在) 下=解説 */
+main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#maps { order: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; height: 40vh; min-height: 220px; background: var(--line); }
+#panel { order: 1; flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px 40px; -webkit-overflow-scrolling: touch; }
+.mapbox { position: relative; min-width: 0; min-height: 0; }
+.mapbox > div { position: absolute; inset: 0; background: #d8d0bf; }
+.maplabel {
+  position: absolute; left: 6px; top: 6px; z-index: 500; pointer-events: none;
+  padding: 2px 8px; font-size: .75rem; color: #fff; background: rgba(43,33,24,.72); border-radius: 3px;
+}
+
+/* PC: 左=解説 右=地図(江戸・現在を縦に並べる) */
+@media (min-width: 900px) {
+  main { flex-direction: row; }
+  #panel { order: 0; flex: 0 0 420px; padding: 18px 22px 60px; border-right: 1px solid var(--line); }
+  #maps { order: 1; flex: 1; height: auto; grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+}
+
+/* 解説パネル */
+.card { margin: 0 0 14px; padding: 12px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+.card h2, .card h3 { margin: 0 0 6px; }
+.lead { font-size: .88rem; line-height: 1.8; }
+h2.title { margin: 0; font-size: 1.3rem; }
+.kana { margin: 0 0 6px; font-size: .75rem; color: #7a6a55; }
+.tags { display: flex; gap: 4px; flex-wrap: wrap; margin: 6px 0 10px; padding: 0; list-style: none; }
+.tags li { padding: 1px 8px; font-size: .72rem; color: var(--accent2); border: 1px solid var(--accent2); border-radius: 999px; }
+.era { margin: 12px 0 4px; font-size: .8rem; font-weight: 700; letter-spacing: .1em; }
+.era.edo { color: var(--accent); } .era.now { color: var(--accent2); }
+.body { margin: 0; font-size: .92rem; line-height: 1.85; }
+.facts { margin: 8px 0 0; padding-left: 1.2em; font-size: .85rem; line-height: 1.7; }
+.back { margin-bottom: 8px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--card); cursor: pointer; }
+.gallery { display: flex; gap: 8px; margin-top: 10px; overflow-x: auto; }
+.gallery figure { flex: 0 0 auto; margin: 0; max-width: 160px; }
+.gallery img { display: block; max-width: 160px; max-height: 190px; border: 1px solid var(--line); cursor: zoom-in; }
+.gallery figcaption { font-size: .7rem; color: #7a6a55; margin-top: 2px; }
+.food { margin-top: 12px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.food h3 { font-size: .85rem; color: var(--accent); }
+.food a { color: var(--accent2); }
+.food li { margin-bottom: 4px; font-size: .85rem; }
+.note { font-size: .72rem; color: #8a7a65; line-height: 1.6; }
+
+.list { margin: 0; padding: 0; list-style: none; }
+.list li { display: flex; align-items: center; gap: 10px; padding: 9px 4px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.list li:hover, .list li:focus { background: #f0e5cc; outline: none; }
+.list .dist { margin-left: auto; font-size: .75rem; color: #7a6a55; white-space: nowrap; }
+.num {
+  display: inline-grid; place-items: center; flex: 0 0 auto;
+  width: 24px; height: 24px; border-radius: 50%;
+  font: 700 12px/1 sans-serif; color: #fff; background: var(--accent); border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.5);
+}
+.num.sel { background: var(--accent2); transform: scale(1.25); }
+.num.off { opacity: .6; border-style: dashed; border-color: var(--accent); background: #fff; color: var(--accent); }
+
+.me-dot { width: 16px; height: 16px; border-radius: 50%; background: #1a73e8; border: 3px solid #fff; box-shadow: 0 0 0 4px rgba(26,115,232,.3); }
+.pin { width: 18px; height: 18px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); background: #e0a000; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.5); }
+
+#lightbox { position: fixed; inset: 0; z-index: 2000; display: grid; place-content: center; justify-items: center; padding: 16px; background: rgba(0,0,0,.85); color: #fff; }
+#lightbox[hidden], #toast[hidden] { display: none; }
+#lightbox img { max-width: 95vw; max-height: 82vh; }
+#toast { position: fixed; left: 50%; bottom: 20px; z-index: 2100; max-width: 90vw; padding: 8px 14px; transform: translateX(-50%); font-size: .85rem; color: #fff; background: rgba(43,33,24,.9); border-radius: 6px; }
+
+.leaflet-container { font-family: inherit; }
+
+@media (max-width: 520px) {
+  #top h1 span { display: none; }
+  #top { gap: 6px; }
+  #search { flex-basis: 140px; }
+}
+
+/* Googleマップで開くボタン */
+.gmap-btn {
+  display: inline-block; padding: 5px 12px; margin: 2px 0 8px;
+  font: 600 .78rem/1.4 sans-serif; color: var(--accent2); text-decoration: none; white-space: nowrap;
+  background: #fff; border: 1px solid var(--accent2); border-radius: 999px; cursor: pointer;
+}
+.gmap-btn:hover, .gmap-btn:focus { background: var(--accent2); color: #fff; }
+.gmap-btn.gmap-ctl { margin: 0; padding: 3px 9px; font-size: .7rem; box-shadow: 0 1px 4px rgba(0,0,0,.35); }
+.leaflet-top.leaflet-right .gmap-ctl { margin-top: 6px; margin-right: 6px; }
+@media (max-width: 520px) { .gmap-btn.gmap-ctl { padding: 2px 7px; font-size: .62rem; } }

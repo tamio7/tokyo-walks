@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>江戸さんぽ 永田町・霞ヶ関</title>
+  <link rel="stylesheet" href="vendor/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header id="top">
+    <h1>江戸さんぽ<span>永田町・霞ヶ関</span></h1>
+    <form id="search" autocomplete="off">
+      <input id="q" type="search" placeholder="住所・場所を検索(例: 永田町1-7-1)" aria-label="住所・場所を検索">
+      <button type="submit">検索</button>
+    </form>
+    <button id="locate" type="button" aria-pressed="false">現在地</button>
+  </header>
+
+  <main>
+    <section id="panel" aria-label="解説"></section>
+    <section id="maps" aria-label="地図">
+      <div class="mapbox">
+        <div id="map-edo"></div>
+        <span class="maplabel">江戸 麹町永田町外桜田絵図</span>
+      </div>
+      <div class="mapbox">
+        <div id="map-now"></div>
+        <span class="maplabel">現在</span>
+      </div>
+    </section>
+  </main>
+
+  <div id="lightbox" hidden><img alt=""><p></p></div>
+  <div id="toast" hidden></div>
+
+  <script src="vendor/leaflet.js"></script>
+  <script src="data/spots.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
