@@ -38,6 +38,7 @@
   .hidden { display:none !important; }
   #menuBtn { position:absolute; right:8px; top:62px; }
   #pauseBtn { position:absolute; right:8px; top:104px; }
+  #bgmBtn { position:absolute; right:8px; top:146px; }
   #pauseMark { position:absolute; left:50%; top:38%; transform:translate(-50%,-50%); font-size:28px; pointer-events:none; }
 </style>
 </head>
@@ -55,6 +56,7 @@
 <div id="dest" class="hidden"><div class="box" style="display:inline-block"><span id="arrow">⬆</span> <span id="destTxt"></span></div></div>
 <div class="btn small" id="menuBtn" style="width:62px;height:34px">メニュー</div>
 <div class="btn small hidden" id="pauseBtn" style="width:62px;height:34px">⏸ 停止</div>
+<div class="btn small" id="bgmBtn" style="width:62px;height:34px">♪ BGM</div>
 <div class="box hidden" id="pauseMark">⏸ 一時停止中</div>
 
 <div class="pad" id="padL">
@@ -74,7 +76,7 @@
     <label>出発地</label><select id="from"></select>
     <label>目的地</label><select id="to"></select>
     <button id="start">離陸する</button>
-    <p>▲▼で機首の上げ下げ、◀▶で旋回。目的地の方角は画面上の黄色い矢印です。遠くへ行くときは「倍速＋」で時間を早めましょう。目的地の上空15km以内に入ると到着です。<br>右上の「⏸ 停止」で一時停止、もう一度押すと再開します。<br>パソコンでは矢印キー・W/S（加速/減速）・1/2（倍速）・V（視点）・スペース（一時停止）も使えます。</p>
+    <p>▲▼で機首の上げ下げ、◀▶で旋回。目的地の方角は画面上の黄色い矢印です。遠くへ行くときは「倍速＋」で時間を早めましょう。目的地の上空15km以内に入ると到着です。<br>右上の「⏸ 停止」で一時停止、もう一度押すと再開します。<br>パソコンでは矢印キー・W/S（加速/減速）・1/2（倍速）・V（視点）・スペース（一時停止）・M（BGM）も使えます。<br>右上の「♪ BGM」で機内の静かな音楽を入／切できます。</p>
   </div>
 </div>
 <div id="msg" class="hidden"><div class="card"><h1 id="msgTitle"></h1><p id="msgBody"></p><button id="msgBtn">メニューへ</button></div></div>
@@ -275,6 +277,105 @@ viewer.scene.preRender.addEventListener(()=>{
 
 // 最初はメニューの背景にサンフランシスコ上空を表示
 Object.assign(plane, { lat:PLACES[0].lat*D2R, lon:PLACES[0].lon*D2R, alt:3000, hdg:90*D2R });
+
+// ===== 機内BGM（ブラウザの中で音を作る。音声ファイル不要） =====
+// 遠くのエンジン音（低いザーッという音）＋ ゆっくり移り変わる和音 ＋ ときどき鳴る柔らかな鈴の音
+const BGM = (() => {
+  let ctx = null, master, musicBus, cabinGain, cabinFilter, delay, on = true, timer = null;
+  let nextChordAt = 0, nextBellAt = 0, chordIdx = 0;
+  try { on = localStorage.getItem("flightBgm") !== "off"; } catch(e) {}
+  const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
+  // 和音の進行（Fmaj9 → Em7 → Dm9 → Cadd9）：明るすぎず、落ち着いた響き
+  const CHORDS = [[41,53,57,60,64,67],[40,52,55,59,62],[38,50,57,60,64],[36,48,55,62,64]];
+  const BELLS  = [72,74,76,79,81,84];   // ペンタトニック（どの和音にも合う音）
+  const CHORD_LEN = 9;                   // 1つの和音を9秒
+
+  function init(){
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    master = ctx.createGain(); master.gain.value = 0; master.connect(ctx.destination);
+    musicBus = ctx.createGain(); musicBus.gain.value = 1; musicBus.connect(master);
+    // やまびこ（ディレイ）
+    delay = ctx.createDelay(2); delay.delayTime.value = 0.55;
+    const fb = ctx.createGain(); fb.gain.value = 0.38;
+    const dl = ctx.createBiquadFilter(); dl.type = "lowpass"; dl.frequency.value = 2200;
+    delay.connect(dl); dl.connect(fb); fb.connect(delay); dl.connect(musicBus);
+    // 機内のエンジン音（ブラウンノイズを低音だけにする）
+    const len = ctx.sampleRate * 4, buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0);
+    let lastv = 0;
+    for (let i = 0; i < len; i++){ lastv = (lastv + 0.02 * (Math.random()*2-1)) / 1.02; d[i] = lastv * 3.5; }
+    const noise = ctx.createBufferSource(); noise.buffer = buf; noise.loop = true;
+    cabinFilter = ctx.createBiquadFilter(); cabinFilter.type = "lowpass"; cabinFilter.frequency.value = 320;
+    cabinGain = ctx.createGain(); cabinGain.gain.value = 0;
+    noise.connect(cabinFilter); cabinFilter.connect(cabinGain); cabinGain.connect(master);
+    noise.start();
+    nextChordAt = nextBellAt = ctx.currentTime + 0.3;
+  }
+
+  function pad(time, notes){
+    const f = ctx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 900; f.Q.value = 0.3;
+    const g = ctx.createGain(); g.gain.setValueAtTime(0, time);
+    g.gain.linearRampToValueAtTime(0.055, time + 3);           // ゆっくり立ち上がる
+    g.gain.setValueAtTime(0.055, time + CHORD_LEN - 1);
+    g.gain.linearRampToValueAtTime(0, time + CHORD_LEN + 3);    // 次の和音と重なりながら消える
+    f.connect(g); g.connect(musicBus);
+    notes.forEach((m, i) => {
+      [-5, 5].forEach(det => {                                  // 少しずらした2つの音で柔らかく
+        const o = ctx.createOscillator(); o.type = i === 0 ? "sine" : "triangle";
+        o.frequency.value = mtof(m); o.detune.value = det;
+        const og = ctx.createGain(); og.gain.value = i === 0 ? 0.9 : 0.35;
+        o.connect(og); og.connect(f);
+        o.start(time); o.stop(time + CHORD_LEN + 3.2);
+      });
+    });
+  }
+
+  function bell(time){
+    const m = BELLS[Math.floor(Math.random() * BELLS.length)];
+    const o = ctx.createOscillator(); o.type = "sine"; o.frequency.value = mtof(m);
+    const o2 = ctx.createOscillator(); o2.type = "sine"; o2.frequency.value = mtof(m) * 2.01;
+    const g = ctx.createGain(), g2 = ctx.createGain(); g2.gain.value = 0.15;
+    g.gain.setValueAtTime(0, time);
+    g.gain.linearRampToValueAtTime(0.05, time + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + 3.5);
+    o.connect(g); o2.connect(g2); g2.connect(g);
+    g.connect(musicBus); g.connect(delay);
+    o.start(time); o2.start(time); o.stop(time + 3.6); o2.stop(time + 3.6);
+  }
+
+  function tick(){
+    const t = ctx.currentTime;
+    while (nextChordAt < t + 1){ pad(nextChordAt, CHORDS[chordIdx++ % CHORDS.length]); nextChordAt += CHORD_LEN; }
+    while (nextBellAt < t + 1){ bell(nextBellAt); nextBellAt += 2.5 + Math.random() * 4.5; }
+    // 状態に合わせて音量を調整：一時停止中は小さく、飛行中だけエンジン音
+    const vol = !on ? 0 : paused ? 0.25 : 1;
+    master.gain.setTargetAtTime(vol, t, 0.6);
+    cabinGain.gain.setTargetAtTime(flying && !paused ? 0.09 : 0, t, 1.2);
+    cabinFilter.frequency.setTargetAtTime(220 + plane.v * 1.4, t, 1.5);   // 速いほど少し高い音に
+  }
+
+  function start(){
+    if (!ctx) init();
+    if (ctx.state === "suspended") ctx.resume();
+    if (!timer) { timer = setInterval(tick, 250); tick(); }
+  }
+  function updateBtn(){
+    const b = document.getElementById("bgmBtn");
+    b.textContent = on ? "♪ BGM" : "♪ 切";
+    b.classList.toggle("on", on);
+  }
+  function toggle(){
+    on = !on;
+    try { localStorage.setItem("flightBgm", on ? "on" : "off"); } catch(e) {}
+    updateBtn();
+    if (on) start(); else if (ctx) tick();
+  }
+  updateBtn();
+  return { start: () => { if (on) start(); }, toggle };
+})();
+// 音はタップした後でないと鳴らせないので、「離陸する」かBGMボタンで開始
+document.getElementById("start").addEventListener("click", () => BGM.start());
+tap("bgmBtn", () => BGM.toggle());
+addEventListener("keydown", e => { if (e.key === "m") BGM.toggle(); });
 </script>
 </body>
 </html>
