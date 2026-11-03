@@ -37,6 +37,8 @@
   .card p { font-size:13px; line-height:1.6; margin:8px 0 0; color:#444; }
   .hidden { display:none !important; }
   #menuBtn { position:absolute; right:8px; top:62px; }
+  #pauseBtn { position:absolute; right:8px; top:104px; }
+  #pauseMark { position:absolute; left:50%; top:38%; transform:translate(-50%,-50%); font-size:28px; pointer-events:none; }
 </style>
 </head>
 <body>
@@ -52,6 +54,8 @@
 </div>
 <div id="dest" class="hidden"><div class="box" style="display:inline-block"><span id="arrow">⬆</span> <span id="destTxt"></span></div></div>
 <div class="btn small" id="menuBtn" style="width:62px;height:34px">メニュー</div>
+<div class="btn small hidden" id="pauseBtn" style="width:62px;height:34px">⏸ 停止</div>
+<div class="box hidden" id="pauseMark">⏸ 一時停止中</div>
 
 <div class="pad" id="padL">
   <div></div><div class="btn" data-k="down">▲</div><div></div>
@@ -70,7 +74,7 @@
     <label>出発地</label><select id="from"></select>
     <label>目的地</label><select id="to"></select>
     <button id="start">離陸する</button>
-    <p>▲▼で機首の上げ下げ、◀▶で旋回。目的地の方角は画面上の黄色い矢印です。遠くへ行くときは「倍速＋」で時間を早めましょう。目的地の上空15km以内に入ると到着です。<br>パソコンでは矢印キー・W/S（加速/減速）・1/2（倍速）・V（視点）も使えます。</p>
+    <p>▲▼で機首の上げ下げ、◀▶で旋回。目的地の方角は画面上の黄色い矢印です。遠くへ行くときは「倍速＋」で時間を早めましょう。目的地の上空15km以内に入ると到着です。<br>右上の「⏸ 停止」で一時停止、もう一度押すと再開します。<br>パソコンでは矢印キー・W/S（加速/減速）・1/2（倍速）・V（視点）・スペース（一時停止）も使えます。</p>
   </div>
 </div>
 <div id="msg" class="hidden"><div class="card"><h1 id="msgTitle"></h1><p id="msgBody"></p><button id="msgBtn">メニューへ</button></div></div>
@@ -128,7 +132,7 @@ const destEntity = viewer.entities.add({
 const R = 6371000, D2R = Math.PI/180;
 const plane = { lat:0, lon:0, alt:1500, hdg:0, pitch:0, roll:0, v:70 }; // v: m/s
 const TIMES = [1, 5, 20, 60, 200];
-let timeIdx = 0, viewDown = false, flying = false, dest = null, startTime = 0, flown = 0;
+let timeIdx = 0, viewDown = false, flying = false, paused = false, pausedAt = 0, dest = null, startTime = 0, flown = 0;
 const keys = {};
 
 // ===== メニュー =====
@@ -156,16 +160,28 @@ document.getElementById("start").onclick = () => {
   destEntity.label.text = t.name;
   timeIdx = 0; flown = 0; startTime = performance.now();
   document.getElementById("menu").classList.add("hidden");
-  flying = true;
+  flying = true; setPaused(false);
   document.getElementById("dest").classList.remove("hidden");
+  document.getElementById("pauseBtn").classList.remove("hidden");
 };
-document.getElementById("menuBtn").onclick = () => { flying = false; document.getElementById("menu").classList.remove("hidden"); };
+document.getElementById("menuBtn").onclick = () => { flying = false; setPaused(false); document.getElementById("pauseBtn").classList.add("hidden"); document.getElementById("menu").classList.remove("hidden"); };
+// 一時停止／再開（止めている間はプレイ時間に数えない）
+function setPaused(v){
+  if (v === paused) return;
+  paused = v;
+  if (paused) pausedAt = performance.now(); else startTime += performance.now() - pausedAt;
+  document.getElementById("pauseBtn").textContent = paused ? "▶ 再開" : "⏸ 停止";
+  document.getElementById("pauseBtn").classList.toggle("on", paused);
+  document.getElementById("pauseMark").classList.toggle("hidden", !paused);
+}
+function togglePause(){ if (flying) setPaused(!paused); }
 document.getElementById("msgBtn").onclick = () => {
   document.getElementById("msg").classList.add("hidden");
   document.getElementById("menu").classList.remove("hidden");
 };
 function showMsg(title, body){
-  flying = false;
+  flying = false; setPaused(false);
+  document.getElementById("pauseBtn").classList.add("hidden");
   document.getElementById("msgTitle").textContent = title;
   document.getElementById("msgBody").innerHTML = body;
   document.getElementById("msg").classList.remove("hidden");
@@ -183,6 +199,7 @@ const tap = (id, fn) => document.getElementById(id).addEventListener("pointerdow
 tap("timeUp",   ()=> timeIdx = Math.min(TIMES.length-1, timeIdx+1));
 tap("timeDown", ()=> timeIdx = Math.max(0, timeIdx-1));
 tap("viewBtn",  ()=> viewDown = !viewDown);
+tap("pauseBtn", togglePause);
 tap("autoBtn",  ()=> { plane.pitch = 0; plane.roll = 0; });
 
 const KEYMAP = { ArrowLeft:"left", ArrowRight:"right", ArrowUp:"down", ArrowDown:"up", w:"faster", s:"slower" };
@@ -191,6 +208,7 @@ addEventListener("keydown", e=>{
   if (e.key==="2") timeIdx = Math.min(TIMES.length-1, timeIdx+1);
   if (e.key==="1") timeIdx = Math.max(0, timeIdx-1);
   if (e.key==="v") viewDown = !viewDown;
+  if (e.key===" " || e.key==="p") { togglePause(); e.preventDefault(); }
 });
 addEventListener("keyup", e=>{ if (KEYMAP[e.key]) keys[KEYMAP[e.key]] = false; });
 
@@ -201,7 +219,7 @@ viewer.scene.preRender.addEventListener(()=>{
   const now = performance.now();
   const dt = Math.min(0.1, (now-last)/1000); last = now;
 
-  if (flying) {
+  if (flying && !paused) {
     // 傾き（ロール）と機首（ピッチ）
     const rollTarget = keys.left ? -35*D2R : keys.right ? 35*D2R : 0;
     plane.roll += (rollTarget - plane.roll) * Math.min(1, dt*2.5);
