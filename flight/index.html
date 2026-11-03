@@ -52,6 +52,7 @@
   <div class="box">高度 <b id="alt">0</b> m</div>
   <div class="box">方位 <b id="hdg">0</b>°</div>
   <div class="box">倍速 <b id="acc">×1</b></div>
+  <div class="box" id="regionBox">上空 <b id="region">―</b></div>
 </div>
 <div id="dest" class="hidden"><div class="box" style="display:inline-block"><span id="arrow">⬆</span> <span id="destTxt"></span></div></div>
 <div class="btn small" id="menuBtn" style="width:62px;height:34px">メニュー</div>
@@ -214,6 +215,46 @@ addEventListener("keydown", e=>{
 });
 addEventListener("keyup", e=>{ if (KEYMAP[e.key]) keys[KEYMAP[e.key]] = false; });
 
+// ===== いまどの州（国）の上空か =====
+// regions.json：アメリカの州境（us-atlas）と南北アメリカの国境（world-atlas）を間引いたもの
+let REGIONS = null;
+fetch("regions.json").then(r=>r.json()).then(d=>{
+  const prep = list => list.map(x=>({ n:x.n, p:x.p.map(pl=>{
+    let a=180,b=90,c=-180,e=-90; pl[0].forEach(([x,y])=>{a=Math.min(a,x);b=Math.min(b,y);c=Math.max(c,x);e=Math.max(e,y);});
+    return { box:[a,b,c,e], rings:pl };
+  })}));
+  REGIONS = { states:prep(d.states), countries:prep(d.countries) };
+}).catch(()=>{ hudEl("regionBox").classList.add("hidden"); });
+function inRing(x, y, ring){
+  let inside = false;
+  for (let i=0, j=ring.length-1; i<ring.length; j=i++) {
+    const [xi,yi]=ring[i], [xj,yj]=ring[j];
+    if ((yi>y)!==(yj>y) && x < (xj-xi)*(y-yi)/(yj-yi)+xi) inside = !inside;
+  }
+  return inside;
+}
+function findIn(list, lon, lat){
+  for (const r of list) for (const pl of r.p) {
+    const [a,b,c,e] = pl.box;
+    if (lon<a || lon>c || lat<b || lat>e) continue;
+    if (inRing(lon,lat,pl.rings[0]) && !pl.rings.slice(1).some(h=>inRing(lon,lat,h))) return r.n;
+  }
+  return null;
+}
+function regionName(latR, lonR){
+  if (!REGIONS) return "―";
+  const lat = latR/D2R, lon = ((lonR/D2R+540)%360)-180;
+  return findIn(REGIONS.states, lon, lat) || findIn(REGIONS.countries, lon, lat) || "海・湖の上";
+}
+let regionTimer = 0;
+
+// 目的地の表示を計器の下にそろえる（スマホで計器が2段になっても重ならないように）
+function placeDest(){
+  const h = hudEl("hud");
+  hudEl("dest").style.top = (h.offsetTop + h.offsetHeight + 6) + "px";
+}
+addEventListener("resize", placeDest);
+
 // ===== 毎フレームの計算 =====
 const hudEl = id => document.getElementById(id);
 let last = performance.now();
@@ -263,6 +304,8 @@ viewer.scene.preRender.addEventListener(()=>{
     const hdgDeg = ((plane.hdg/D2R)%360+360)%360;
     hudEl("hdg").textContent = Math.round(hdgDeg);
     hudEl("acc").textContent = "×" + TIMES[timeIdx];
+    regionTimer -= dt;
+    if (regionTimer <= 0) { regionTimer = 0.5; hudEl("region").textContent = regionName(plane.lat, plane.lon); placeDest(); }
     const rel = bearing(plane.lat, plane.lon, dest.lat, dest.lon)/D2R - hdgDeg;
     hudEl("arrow").style.transform = `rotate(${rel}deg)`;
     hudEl("destTxt").textContent = `${dest.name}まで ${Math.round(dist/1000).toLocaleString()} km`;
