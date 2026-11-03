@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>日本列島 遊覧飛行</title>
+<script src="https://cdn.jsdelivr.net/npm/cesium@1.123.0/Build/Cesium/Cesium.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/cesium@1.123.0/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<style>
+  html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#000;
+    font-family: "Hiragino Sans", "Noto Sans JP", sans-serif; -webkit-user-select:none; user-select:none; touch-action:none; }
+  #globe { position:absolute; inset:0; }
+  .cesium-viewer-bottom { opacity:.6; }
+  /* 照準（機首） */
+  #nose { position:absolute; left:50%; top:50%; width:90px; height:30px; margin:-15px 0 0 -45px; pointer-events:none; }
+  /* 計器 */
+  #hud { position:absolute; top:8px; left:8px; right:8px; display:flex; gap:6px; flex-wrap:wrap; pointer-events:none; }
+  .box { background:rgba(0,0,0,.55); color:#fff; border-radius:8px; padding:4px 9px; font-size:13px; line-height:1.3; }
+  .box b { font-size:17px; color:#7fffd4; }
+  #dest { position:absolute; top:62px; left:8px; right:78px; text-align:center; pointer-events:none; }
+  #arrow { display:inline-block; font-size:26px; color:#ffd54f; transition:transform .1s; }
+  /* 操作ボタン */
+  .pad { position:absolute; bottom:14px; display:grid; gap:6px; }
+  #padL { left:12px; grid-template-columns:repeat(3,58px); grid-template-rows:repeat(3,58px); }
+  #padR { right:12px; grid-template-columns:repeat(2,62px); grid-template-rows:repeat(3,58px); }
+  .btn { background:rgba(255,255,255,.22); border:1px solid rgba(255,255,255,.5); color:#fff; border-radius:12px;
+    font-size:22px; display:flex; align-items:center; justify-content:center; touch-action:none; }
+  .btn.small { font-size:14px; }
+  .btn:active, .btn.on { background:rgba(127,255,212,.45); }
+  /* メニュー */
+  #menu, #msg { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.55); }
+  .card { background:#fff; color:#222; border-radius:14px; padding:18px 20px; width:min(88vw,380px); box-shadow:0 6px 30px rgba(0,0,0,.4); }
+  .card h1 { font-size:20px; margin:0 0 10px; }
+  .card label { display:block; font-size:14px; margin:10px 0 4px; }
+  .card select { width:100%; font-size:16px; padding:6px; }
+  .card button { margin-top:16px; width:100%; font-size:18px; padding:10px; border:0; border-radius:10px; background:#1e88e5; color:#fff; }
+  .card p { font-size:13px; line-height:1.6; margin:8px 0 0; color:#444; }
+  .hidden { display:none !important; }
+  #menuBtn { position:absolute; right:8px; top:62px; }
+  #pauseBtn { position:absolute; right:8px; top:104px; }
+  #bgmBtn { position:absolute; right:8px; top:146px; }
+  #pauseMark { position:absolute; left:50%; top:38%; transform:translate(-50%,-50%); font-size:28px; pointer-events:none; }
+</style>
+</head>
+<body>
+<div id="globe"></div>
+
+<svg id="nose" viewBox="0 0 90 30"><path d="M0 15 H30 L45 25 L60 15 H90" fill="none" stroke="#ffd54f" stroke-width="3"/></svg>
+
+<div id="hud">
+  <div class="box">速度 <b id="spd">0</b> km/h</div>
+  <div class="box">高度 <b id="alt">0</b> m</div>
+  <div class="box">方位 <b id="hdg">0</b>°</div>
+  <div class="box">倍速 <b id="acc">×1</b></div>
+  <div class="box" id="regionBox">上空 <b id="region">―</b></div>
+</div>
+<div id="dest" class="hidden"><div class="box" style="display:inline-block"><span id="arrow">⬆</span> <span id="destTxt"></span></div></div>
+<div class="btn small" id="menuBtn" style="width:62px;height:34px">メニュー</div>
+<div class="btn small hidden" id="pauseBtn" style="width:62px;height:34px">⏸ 停止</div>
+<div class="btn small" id="bgmBtn" style="width:62px;height:34px">♪ BGM</div>
+<div class="box hidden" id="pauseMark">⏸ 一時停止中</div>
+
+<div class="pad" id="padL">
+  <div></div><div class="btn" data-k="down">▲</div><div></div>
+  <div class="btn" data-k="left">◀</div><div class="btn small" id="viewBtn">視点</div><div class="btn" data-k="right">▶</div>
+  <div></div><div class="btn" data-k="up">▼</div><div></div>
+</div>
+<div class="pad" id="padR">
+  <div class="btn small" data-k="faster">加速</div><div class="btn small" id="timeUp">倍速＋</div>
+  <div class="btn small" data-k="slower">減速</div><div class="btn small" id="timeDown">倍速－</div>
+  <div class="btn small" id="autoBtn" style="grid-column:span 2">水平飛行</div>
+</div>
+
+<div id="menu">
+  <div class="card">
+    <h1>✈ 日本列島 遊覧飛行</h1>
+    <label>出発地</label><select id="from"></select>
+    <label>目的地</label><select id="to"></select>
+    <button id="start">離陸する</button>
+    <p>▲▼で機首の上げ下げ、◀▶で旋回。目的地の方角は画面上の黄色い矢印です。遠くへ行くときは「倍速＋」で時間を早めましょう。目的地の上空15km以内に入ると到着です。<br>右上の「⏸ 停止」で一時停止、もう一度押すと再開します。<br>パソコンでは矢印キー・W/S（加速/減速）・1/2（倍速）・V（視点）・スペース（一時停止）・M（BGM）も使えます。<br>右上の「♪ BGM」で機内の静かな音楽を入／切できます。<br><span style="font-size:11px;color:#888">都道府県境：地球地図日本（国土地理院）</span><br><a href="../">▶ アメリカ大陸版へ</a></p>
+  </div>
+</div>
+<div id="msg" class="hidden"><div class="card"><h1 id="msgTitle"></h1><p id="msgBody"></p><button id="msgBtn">メニューへ</button></div></div>
+
+<script>
+// ===== 場所のリスト（緯度・経度） =====
+const PLACES = [
+  { name:"新千歳空港（北海道）",   lat:42.7752, lon:141.6923 },
+  { name:"函館空港",               lat:41.7700, lon:140.8219 },
+  { name:"青森空港",               lat:40.7347, lon:140.6908 },
+  { name:"仙台空港",               lat:38.1397, lon:140.9170 },
+  { name:"新潟空港",               lat:37.9559, lon:139.1206 },
+  { name:"成田空港",               lat:35.7720, lon:140.3929 },
+  { name:"羽田空港（東京国際）",   lat:35.5494, lon:139.7798 },
+  { name:"富士山静岡空港",         lat:34.7961, lon:138.1894 },
+  { name:"小松空港",               lat:36.3946, lon:136.4067 },
+  { name:"中部国際空港セントレア", lat:34.8584, lon:136.8054 },
+  { name:"伊丹空港（大阪国際）",   lat:34.7855, lon:135.4382 },
+  { name:"関西国際空港",           lat:34.4347, lon:135.2440 },
+  { name:"出雲縁結び空港",         lat:35.4136, lon:132.8900 },
+  { name:"広島空港",               lat:34.4361, lon:132.9194 },
+  { name:"高松空港",               lat:34.2142, lon:134.0156 },
+  { name:"松山空港",               lat:33.8272, lon:132.6997 },
+  { name:"福岡空港",               lat:33.5859, lon:130.4507 },
+  { name:"長崎空港",               lat:32.9169, lon:129.9136 },
+  { name:"鹿児島空港",             lat:31.8034, lon:130.7195 },
+  { name:"那覇空港（沖縄）",       lat:26.1958, lon:127.6459 },
+  { name:"新石垣空港",             lat:24.3964, lon:124.2450 },
+];
+
+// ===== 地球（Cesium）の準備：Esriの衛星写真を使用（APIキー不要） =====
+const viewer = new Cesium.Viewer("globe", {
+  baseLayer: new Cesium.ImageryLayer(new Cesium.UrlTemplateImageryProvider({
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    maximumLevel: 19, credit: "Imagery © Esri, Maxar, Earthstar Geographics"
+  })),
+  terrainProvider: new Cesium.EllipsoidTerrainProvider(),
+  animation:false, timeline:false, baseLayerPicker:false, geocoder:false, homeButton:false,
+  sceneModePicker:false, navigationHelpButton:false, fullscreenButton:false, infoBox:false, selectionIndicator:false,
+});
+// 地名・国境のラベルを重ねる
+viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+  url: "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+  maximumLevel: 19
+}));
+viewer.scene.screenSpaceCameraController.enableInputs = false; // 指で地球を回さない
+viewer.scene.skyAtmosphere.show = true;
+viewer.scene.fog.enabled = true;
+viewer.scene.globe.maximumScreenSpaceError = 2.5;
+
+// 目的地のマーカー
+const destEntity = viewer.entities.add({
+  position: Cesium.Cartesian3.fromDegrees(0,0),
+  point: { pixelSize: 14, color: Cesium.Color.YELLOW, outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+           disableDepthTestDistance: Number.POSITIVE_INFINITY },
+  label: { text:"", font:"16px sans-serif", fillColor:Cesium.Color.YELLOW, outlineColor:Cesium.Color.BLACK,
+           outlineWidth:3, style:Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset:new Cesium.Cartesian2(0,-22),
+           disableDepthTestDistance: Number.POSITIVE_INFINITY }
+});
+
+// ===== 飛行機の状態 =====
+const R = 6371000, D2R = Math.PI/180;
+const plane = { lat:0, lon:0, alt:1500, hdg:0, pitch:0, roll:0, v:70 }; // v: m/s
+const TIMES = [1, 5, 20, 60, 200];
+let timeIdx = 0, viewDown = false, flying = false, paused = false, pausedAt = 0, dest = null, startTime = 0, flown = 0;
+const keys = {};
+
+// ===== メニュー =====
+const fromSel = document.getElementById("from"), toSel = document.getElementById("to");
+PLACES.forEach((p,i)=>{ fromSel.add(new Option(p.name,i)); toSel.add(new Option(p.name,i)); });
+fromSel.value = 6; toSel.value = 0; // 羽田 → 新千歳
+
+function bearing(lat1, lon1, lat2, lon2){ // ラジアン
+  const y = Math.sin(lon2-lon1)*Math.cos(lat2);
+  const x = Math.cos(lat1)*Math.sin(lat2) - Math.sin(lat1)*Math.cos(lat2)*Math.cos(lon2-lon1);
+  return Math.atan2(y,x);
+}
+function distance(lat1, lon1, lat2, lon2){ // メートル
+  const a = Math.sin((lat2-lat1)/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin((lon2-lon1)/2)**2;
+  return 2*R*Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
+document.getElementById("start").onclick = () => {
+  const f = PLACES[fromSel.value], t = PLACES[toSel.value];
+  if (f === t) { toSel.focus(); return; }
+  dest = { name:t.name, lat:t.lat*D2R, lon:t.lon*D2R };
+  Object.assign(plane, { lat:f.lat*D2R, lon:f.lon*D2R, alt:1500, pitch:0, roll:0, v:70 });
+  plane.hdg = bearing(plane.lat, plane.lon, dest.lat, dest.lon);
+  destEntity.position = Cesium.Cartesian3.fromDegrees(t.lon, t.lat, 0);
+  destEntity.label.text = t.name;
+  timeIdx = 0; flown = 0; startTime = performance.now();
+  document.getElementById("menu").classList.add("hidden");
+  flying = true; setPaused(false);
+  document.getElementById("dest").classList.remove("hidden");
+  document.getElementById("pauseBtn").classList.remove("hidden");
+};
+document.getElementById("menuBtn").onclick = () => { flying = false; setPaused(false); document.getElementById("pauseBtn").classList.add("hidden"); document.getElementById("menu").classList.remove("hidden"); };
+// 一時停止／再開（止めている間はプレイ時間に数えない）
+function setPaused(v){
+  if (v === paused) return;
+  paused = v;
+  if (paused) pausedAt = performance.now(); else startTime += performance.now() - pausedAt;
+  document.getElementById("pauseBtn").textContent = paused ? "▶ 再開" : "⏸ 停止";
+  document.getElementById("pauseBtn").classList.toggle("on", paused);
+  document.getElementById("pauseMark").classList.toggle("hidden", !paused);
+}
+function togglePause(){ if (flying) setPaused(!paused); }
+document.getElementById("msgBtn").onclick = () => {
+  document.getElementById("msg").classList.add("hidden");
+  document.getElementById("menu").classList.remove("hidden");
+};
+function showMsg(title, body){
+  flying = false; setPaused(false);
+  document.getElementById("pauseBtn").classList.add("hidden");
+  document.getElementById("msgTitle").textContent = title;
+  document.getElementById("msgBody").innerHTML = body;
+  document.getElementById("msg").classList.remove("hidden");
+}
+
+// ===== 操作（ボタン・キーボード） =====
+document.querySelectorAll("[data-k]").forEach(b=>{
+  const k = b.dataset.k;
+  const on = e => { e.preventDefault(); keys[k]=true; b.classList.add("on"); };
+  const off = e => { keys[k]=false; b.classList.remove("on"); };
+  b.addEventListener("pointerdown", on); b.addEventListener("pointerup", off);
+  b.addEventListener("pointerleave", off); b.addEventListener("pointercancel", off);
+});
+const tap = (id, fn) => document.getElementById(id).addEventListener("pointerdown", e=>{ e.preventDefault(); fn(); });
+tap("timeUp",   ()=> timeIdx = Math.min(TIMES.length-1, timeIdx+1));
+tap("timeDown", ()=> timeIdx = Math.max(0, timeIdx-1));
+tap("viewBtn",  ()=> viewDown = !viewDown);
+tap("pauseBtn", togglePause);
+tap("autoBtn",  ()=> { plane.pitch = 0; plane.roll = 0; });
+
+const KEYMAP = { ArrowLeft:"left", ArrowRight:"right", ArrowUp:"down", ArrowDown:"up", w:"faster", s:"slower" };
+addEventListener("keydown", e=>{
+  if (KEYMAP[e.key]) { keys[KEYMAP[e.key]] = true; e.preventDefault(); }
+  if (e.key==="2") timeIdx = Math.min(TIMES.length-1, timeIdx+1);
+  if (e.key==="1") timeIdx = Math.max(0, timeIdx-1);
+  if (e.key==="v") viewDown = !viewDown;
+  if (e.key===" " || e.key==="p") { togglePause(); e.preventDefault(); }
+});
+addEventListener("keyup", e=>{ if (KEYMAP[e.key]) keys[KEYMAP[e.key]] = false; });
+
+// ===== いまどの州（国）の上空か =====
+// regions.json：都道府県境（地球地図日本・国土地理院をもとにdataofjapan/landが変換）と周辺国の国境（world-atlas）を間引いたもの
+let REGIONS = null;
+fetch("regions.json").then(r=>r.json()).then(d=>{
+  const prep = list => list.map(x=>({ n:x.n, p:x.p.map(pl=>{
+    let a=180,b=90,c=-180,e=-90; pl[0].forEach(([x,y])=>{a=Math.min(a,x);b=Math.min(b,y);c=Math.max(c,x);e=Math.max(e,y);});
+    return { box:[a,b,c,e], rings:pl };
+  })}));
+  REGIONS = { states:prep(d.states), countries:prep(d.countries) };
+}).catch(()=>{ hudEl("regionBox").classList.add("hidden"); });
+function inRing(x, y, ring){
+  let inside = false;
+  for (let i=0, j=ring.length-1; i<ring.length; j=i++) {
+    const [xi,yi]=ring[i], [xj,yj]=ring[j];
+    if ((yi>y)!==(yj>y) && x < (xj-xi)*(y-yi)/(yj-yi)+xi) inside = !inside;
+  }
+  return inside;
+}
+function findIn(list, lon, lat){
+  for (const r of list) for (const pl of r.p) {
+    const [a,b,c,e] = pl.box;
+    if (lon<a || lon>c || lat<b || lat>e) continue;
+    if (inRing(lon,lat,pl.rings[0]) && !pl.rings.slice(1).some(h=>inRing(lon,lat,h))) return r.n;
+  }
+  return null;
+}
+function regionName(latR, lonR){
+  if (!REGIONS) return "―";
+  const lat = latR/D2R, lon = ((lonR/D2R+540)%360)-180;
+  return findIn(REGIONS.states, lon, lat) || findIn(REGIONS.countries, lon, lat) || "海の上";
+}
+let regionTimer = 0;
+
+// 目的地の表示を計器の下にそろえる（スマホで計器が2段になっても重ならないように）
+function placeDest(){
+  const h = hudEl("hud");
+  hudEl("dest").style.top = (h.offsetTop + h.offsetHeight + 6) + "px";
+}
+addEventListener("resize", placeDest);
+
+// ===== 毎フレームの計算 =====
+const hudEl = id => document.getElementById(id);
+let last = performance.now();
+viewer.scene.preRender.addEventListener(()=>{
+  const now = performance.now();
+  const dt = Math.min(0.1, (now-last)/1000); last = now;
+
+  if (flying && !paused) {
+    // 傾き（ロール）と機首（ピッチ）
+    const rollTarget = keys.left ? -35*D2R : keys.right ? 35*D2R : 0;
+    plane.roll += (rollTarget - plane.roll) * Math.min(1, dt*2.5);
+    if (keys.down) plane.pitch -= 12*D2R*dt;   // ▲ = 機首下げ（操縦桿を押す）
+    if (keys.up)   plane.pitch += 12*D2R*dt;   // ▼ = 機首上げ（操縦桿を引く）
+    plane.pitch = Math.max(-30*D2R, Math.min(30*D2R, plane.pitch));
+    // 速度（km/hで 150〜900）
+    if (keys.faster) plane.v += 40*dt;
+    if (keys.slower) plane.v -= 40*dt;
+    plane.v = Math.max(150/3.6, Math.min(900/3.6, plane.v));
+    // 旋回：傾けた分だけ曲がる（倍速でも旋回は普通の速さ）
+    plane.hdg += 9.8*Math.tan(plane.roll)/Math.max(plane.v,60)*dt * 1.6;
+
+    // 前進（倍速をかける）
+    const d = plane.v * dt * TIMES[timeIdx];
+    const dh = d*Math.cos(plane.pitch), dv = d*Math.sin(plane.pitch);
+    const ang = dh/(R+plane.alt);
+    const lat2 = Math.asin(Math.sin(plane.lat)*Math.cos(ang) + Math.cos(plane.lat)*Math.sin(ang)*Math.cos(plane.hdg));
+    const lon2 = plane.lon + Math.atan2(Math.sin(plane.hdg)*Math.sin(ang)*Math.cos(plane.lat),
+                                        Math.cos(ang) - Math.sin(plane.lat)*Math.sin(lat2));
+    // 進んだぶん方位を補正（大円に沿って飛ぶ）
+    plane.hdg = bearing(lat2, lon2, plane.lat, plane.lon) + Math.PI;
+    plane.lat = lat2; plane.lon = lon2;
+    plane.alt = Math.min(15000, plane.alt + dv);
+    flown += dh;
+
+    if (plane.alt <= 30) {
+      showMsg("💥 墜落しました", "高度が低くなりすぎました。▼ボタンで機首を上げるのを忘れずに！");
+    }
+    const dist = distance(plane.lat, plane.lon, dest.lat, dest.lon);
+    if (dist < 15000) {
+      const min = ((now-startTime)/60000).toFixed(1);
+      showMsg("🎉 到着！", `${dest.name}に到着しました。<br>飛行距離 約${Math.round(flown/1000).toLocaleString()} km／プレイ時間 ${min} 分`);
+    }
+
+    // 計器の表示
+    hudEl("spd").textContent = Math.round(plane.v*3.6);
+    hudEl("alt").textContent = Math.round(plane.alt).toLocaleString();
+    const hdgDeg = ((plane.hdg/D2R)%360+360)%360;
+    hudEl("hdg").textContent = Math.round(hdgDeg);
+    hudEl("acc").textContent = "×" + TIMES[timeIdx];
+    regionTimer -= dt;
+    if (regionTimer <= 0) { regionTimer = 0.5; hudEl("region").textContent = regionName(plane.lat, plane.lon); placeDest(); }
+    const rel = bearing(plane.lat, plane.lon, dest.lat, dest.lon)/D2R - hdgDeg;
+    hudEl("arrow").style.transform = `rotate(${rel}deg)`;
+    hudEl("destTxt").textContent = `${dest.name}まで ${Math.round(dist/1000).toLocaleString()} km`;
+  }
+
+  // カメラ＝操縦席からの眺め
+  viewer.camera.setView({
+    destination: Cesium.Cartesian3.fromRadians(plane.lon, plane.lat, plane.alt),
+    orientation: { heading: plane.hdg, pitch: plane.pitch + (viewDown ? -60 : -12)*D2R, roll: plane.roll }
+  });
+});
+
+// 最初はメニューの背景に羽田空港の上空を表示
+Object.assign(plane, { lat:PLACES[6].lat*D2R, lon:PLACES[6].lon*D2R, alt:3000, hdg:270*D2R });
+
+// ===== 機内BGM（ブラウザの中で音を作る。音声ファイル不要） =====
+// 遠くのエンジン音（低いザーッという音）＋ ゆっくり移り変わる和音 ＋ ときどき鳴る柔らかな鈴の音
+const BGM = (() => {
+  let ctx = null, master, musicBus, cabinGain, cabinFilter, delay, on = true, timer = null;
+  let nextChordAt = 0, nextBellAt = 0, chordIdx = 0;
+  try { on = localStorage.getItem("flightBgm") !== "off"; } catch(e) {}
+  const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
+  // 和音の進行（Fmaj9 → Em7 → Dm9 → Cadd9）：明るすぎず、落ち着いた響き
+  const CHORDS = [[41,53,57,60,64,67],[40,52,55,59,62],[38,50,57,60,64],[36,48,55,62,64]];
+  const BELLS  = [72,74,76,79,81,84];   // ペンタトニック（どの和音にも合う音）
+  const CHORD_LEN = 9;                   // 1つの和音を9秒
+
+  function init(){
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    master = ctx.createGain(); master.gain.value = 0; master.connect(ctx.destination);
+    musicBus = ctx.createGain(); musicBus.gain.value = 1; musicBus.connect(master);
+    // やまびこ（ディレイ）
+    delay = ctx.createDelay(2); delay.delayTime.value = 0.55;
+    const fb = ctx.createGain(); fb.gain.value = 0.38;
+    const dl = ctx.createBiquadFilter(); dl.type = "lowpass"; dl.frequency.value = 2200;
+    delay.connect(dl); dl.connect(fb); fb.connect(delay); dl.connect(musicBus);
+    // 機内のエンジン音（ブラウンノイズを低音だけにする）
+    const len = ctx.sampleRate * 4, buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0);
+    let lastv = 0;
+    for (let i = 0; i < len; i++){ lastv = (lastv + 0.02 * (Math.random()*2-1)) / 1.02; d[i] = lastv * 3.5; }
+    const noise = ctx.createBufferSource(); noise.buffer = buf; noise.loop = true;
+    cabinFilter = ctx.createBiquadFilter(); cabinFilter.type = "lowpass"; cabinFilter.frequency.value = 320;
+    cabinGain = ctx.createGain(); cabinGain.gain.value = 0;
+    noise.connect(cabinFilter); cabinFilter.connect(cabinGain); cabinGain.connect(master);
+    noise.start();
+    nextChordAt = nextBellAt = ctx.currentTime + 0.3;
+  }
+
+  function pad(time, notes){
+    const f = ctx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 900; f.Q.value = 0.3;
+    const g = ctx.createGain(); g.gain.setValueAtTime(0, time);
+    g.gain.linearRampToValueAtTime(0.055, time + 3);           // ゆっくり立ち上がる
+    g.gain.setValueAtTime(0.055, time + CHORD_LEN - 1);
+    g.gain.linearRampToValueAtTime(0, time + CHORD_LEN + 3);    // 次の和音と重なりながら消える
+    f.connect(g); g.connect(musicBus);
+    notes.forEach((m, i) => {
+      [-5, 5].forEach(det => {                                  // 少しずらした2つの音で柔らかく
+        const o = ctx.createOscillator(); o.type = i === 0 ? "sine" : "triangle";
+        o.frequency.value = mtof(m); o.detune.value = det;
+        const og = ctx.createGain(); og.gain.value = i === 0 ? 0.9 : 0.35;
+        o.connect(og); og.connect(f);
+        o.start(time); o.stop(time + CHORD_LEN + 3.2);
+      });
+    });
+  }
+
+  function bell(time){
+    const m = BELLS[Math.floor(Math.random() * BELLS.length)];
+    const o = ctx.createOscillator(); o.type = "sine"; o.frequency.value = mtof(m);
+    const o2 = ctx.createOscillator(); o2.type = "sine"; o2.frequency.value = mtof(m) * 2.01;
+    const g = ctx.createGain(), g2 = ctx.createGain(); g2.gain.value = 0.15;
+    g.gain.setValueAtTime(0, time);
+    g.gain.linearRampToValueAtTime(0.05, time + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + 3.5);
+    o.connect(g); o2.connect(g2); g2.connect(g);
+    g.connect(musicBus); g.connect(delay);
+    o.start(time); o2.start(time); o.stop(time + 3.6); o2.stop(time + 3.6);
+  }
+
+  function tick(){
+    const t = ctx.currentTime;
+    while (nextChordAt < t + 1){ pad(nextChordAt, CHORDS[chordIdx++ % CHORDS.length]); nextChordAt += CHORD_LEN; }
+    while (nextBellAt < t + 1){ bell(nextBellAt); nextBellAt += 2.5 + Math.random() * 4.5; }
+    // 状態に合わせて音量を調整：一時停止中は小さく、飛行中だけエンジン音
+    const vol = !on ? 0 : paused ? 0.25 : 1;
+    master.gain.setTargetAtTime(vol, t, 0.6);
+    cabinGain.gain.setTargetAtTime(flying && !paused ? 0.09 : 0, t, 1.2);
+    cabinFilter.frequency.setTargetAtTime(220 + plane.v * 1.4, t, 1.5);   // 速いほど少し高い音に
+  }
+
+  function start(){
+    if (!ctx) init();
+    if (ctx.state === "suspended") ctx.resume();
+    if (!timer) { timer = setInterval(tick, 250); tick(); }
+  }
+  function updateBtn(){
+    const b = document.getElementById("bgmBtn");
+    b.textContent = on ? "♪ BGM" : "♪ 切";
+    b.classList.toggle("on", on);
+  }
+  function toggle(){
+    on = !on;
+    try { localStorage.setItem("flightBgm", on ? "on" : "off"); } catch(e) {}
+    updateBtn();
+    if (on) start(); else if (ctx) tick();
+  }
+  updateBtn();
+  return { start: () => { if (on) start(); }, toggle };
+})();
+// 音はタップした後でないと鳴らせないので、「離陸する」かBGMボタンで開始
+document.getElementById("start").addEventListener("click", () => BGM.start());
+tap("bgmBtn", () => BGM.toggle());
+addEventListener("keydown", e => { if (e.key === "m") BGM.toggle(); });
+</script>
+</body>
+</html>
